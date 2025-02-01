@@ -1,0 +1,244 @@
+---
+title: "Gousto"
+author: "Ahmed Ahmed"
+date: "31/05/2022"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Prepare for analyses
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(ggpubr)
+library(ggfortify)
+library(formattable)
+```
+
+
+
+### Data
+
+Upload population data
+
+```{r}
+population <-  read.csv("population_data.csv")
+head(population)
+```
+
+
+
+
+### Building linear regression model
+
+$Population = \beta_0 + \beta_1 * time + e$ 
+
+Applying the model using R, we have
+
+
+```{r}
+population.lm <- lm(Population ~ Time, data = population)
+summary(population.lm)
+```
+
+So our parameters are $\hat{\beta_0}$ = `r population.lm$coefficient[1]` and 
+$\hat{\beta_1}$ = `r population.lm$coefficient[2]`
+
+We can now plot the regression line in ggplot2
+
+```{r}
+p <- ggplot(population,aes(Time,Population)) +
+  geom_point() +
+  geom_smooth(method='lm', se=FALSE) 
+
+lm_eqn <- function(population){
+  m <- lm(Population ~ Time, population);
+  eq <- substitute(italic(Population) == a + b %.% italic(time)*","~~italic(r)^2~"="~r2, 
+                   list(a = format(unname(coef(m)[1]), digits = 2),
+                        b = format(unname(coef(m)[2]), digits = 2),
+                        r2 = format(summary(m)$r.squared, digits = 3)))
+  as.character(as.expression(eq));
+}
+
+p1 <- p + geom_text(x = 15, y = 6.4e7, label = lm_eqn(population), parse = TRUE)
+
+p1 
+```
+
+
+
+#### **Fitted values and residuals**
+
+We can add fitted values and residuals. Using the boom package I will produce several metrics useful for regression 
+diagnostics.
+
+```{r}
+model.diag.metrics <- augment(population.lm)
+head(model.diag.metrics)
+```
+
+
+```{r}
+ggplot(model.diag.metrics, aes(Time, Population)) +
+  geom_point() +
+  stat_smooth(method = lm, se = FALSE) +
+  geom_segment(aes(xend = Time, yend = .fitted), color = "red", size = 0.3)
+```
+
+
+## Regression assumptions
+
+For linear regression we check that our data meet four main assumptions:-
+
+- Independence of observation (no correlation). Only one independent variable so no need to worry about correlation
+between independent variables.
+- Normality of residuals.Residuals are assumed to be normally 
+distributed.
+- Linearity of the data. Relationship between the independent(Time)
+and dependent(Population) is assumed to be linear.
+- Independence of residuals error terms.
+
+We can run regression diagnostics
+
+```{r}
+autoplot(population.lm)
+```
+
+#### **Linearity of the data**
+
+This assumption can be checked by inspecting Residuals vs Fitted plot.
+
+```{r}
+autoplot(population.lm,1)
+```
+
+
+This plot shows if residuals have non-linear patterns.For a linear
+relationship we expect see evenly spread residuals around a 
+horizontal line without distinct patterns. 
+
+Here, we see a a parabola. The non-linear relationship was not
+explained by the model and was left out in the residuals.
+
+
+#### **Normality of the residuals**
+
+
+```{r}
+autoplot(population.lm,2)
+```
+
+This plot shows if residuals are normally distributed. Ideally,
+residuals are lined up on the straight dashed line.
+
+This assumptions seems to hold well, apart from the tails.
+
+
+#### **Homogeneity of variance**
+
+
+```{r}
+autoplot(population.lm,3)
+```
+
+This plot shows if residuals are constant along the ranges of 
+independent variable. 
+
+It can be seen that the variability (variances) of the residuals increases at the beginning and end, then decrease at the middle. Suggesting a non-constant variances in the residuals errors (or heteroscedasticity).
+
+
+### Prediction
+
+For prediction we have two distinctive measures:-
+
+- Confidence Interval: prediction of the mean response.
+- Prediction Interval: prediction of a future value.
+
+For our model we have;
+
+
+$Population = \beta_0 + \beta_1 * time + e$ 
+
+Since $E(\epsilon)=0$.Let $time^*$ denote the value of independent variable time. We can predict our point estimate, as follows
+
+$\hat{population}=\hat{\beta_0}+\hat{\beta_1}*time^*$
+
+For the CI, our estimate only accounts for the variance in $\tilde{\beta_0}$
+and $\tilde{\beta_1}$ i.e. 
+
+$V(\tilde{\mu_{pop}})=\sigma^{2}[\frac{1}{n}+\frac{(time^*-\overline{time}^{2})}{\sum time_i-\frac{(\sum time_i)^2}{n}}]$
+
+For the PI,we need to account for the variance in the parameters and the error term. So we have,
+
+$V(Population)=\sigma^{2}[1+\frac{1}{n}+\frac{(time^*-\overline{time}^{2})}{\sum time_i-\frac{(\sum time_i)^2}{n}}]$
+
+Replacing $\sigma$ by its estimate s, we have a confidence interval(CI)
+
+$\hat{\beta_0} + \hat{\beta_1} * time^* \pm t_{\frac{\alpha}{2},n-2} * s\sqrt{[\frac{1}{n}+\frac{(time^*-\overline{time}^{2})}{\sum time_i-\frac{(\sum time_i)^2}{n}}]}$
+
+and Prediction interval (PI)
+
+$\hat{\beta_0} + \hat{\beta_1} * time^* \pm t_{\frac{\alpha}{2},n-2} * s\sqrt{[1+\frac{1}{n}+\frac{(time^*-\overline{time}^{2})}{\sum time_i-\frac{(\sum time_i)^2}{n}}]}$
+
+
+#### **Plot**
+
+Prepare data frame for predictions entries.
+
+```{r}
+population[nrow(population)+30,] <- NA
+population
+population[51:80,1] <- 50:79
+```
+
+```{r}
+predictions <- predict(population.lm, data.frame(Time=c(0:79)), interval="predict")
+all_data <- cbind(population, predictions)
+```
+
+
+
+
+```{r warning=FALSE}
+ggplot(all_data, aes(x = Time, y = Population)) + #define x and y axis variables
+  geom_point()+xlim(0,80) + #add scatterplot points
+  stat_smooth(method = lm,fullrange = TRUE) + #confidence bands
+  geom_line(aes(y = lwr), col = "coral2", linetype = "dashed") + #lwr pred interval
+  geom_line(aes(y = upr), col = "coral2", linetype = "dashed") #upr pred interval
+
+```
+
+
+Our point estimate is then
+
+```{r}
+(point_est <- comma(all_data[nrow(all_data),"fit"]))
+```
+
+
+Similar to our google sheets workings, but now we can obtain our 95% prediction interval
+
+```{r}
+comma(c(all_data[nrow(all_data),"upr"],all_data[nrow(all_data),"lwr"]))
+```
+
+
+```{r}
+(error_range <- comma(all_data[nrow(all_data),"upr"] - all_data[nrow(all_data),"lwr"]))
+```
+
+
+```{r}
+error_range/point_est 
+```
+
+
